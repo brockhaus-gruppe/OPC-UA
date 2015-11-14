@@ -66,7 +66,7 @@ public class Midgard
 	List<ReferenceDescription> references;
 	UnsignedInteger attributeId = UnsignedInteger.valueOf(13);
 	Subscription subscription = new Subscription();
-	Logger log = Logger.getLogger(Midgard.class.getName());
+	Logger log = Logger.getLogger(this.getClass().getName());
 	
 	// Constructor
 	public Midgard() throws FileNotFoundException, IOException
