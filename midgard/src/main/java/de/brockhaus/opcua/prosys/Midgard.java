@@ -6,10 +6,10 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Scanner;
 import java.util.TimeZone;
 
 import org.apache.log4j.Logger;
@@ -56,37 +56,56 @@ import com.prosysopc.ua.nodes.UaReferenceType;
 import com.prosysopc.ua.nodes.UaType;
 import com.prosysopc.ua.nodes.UaVariable;
 import com.prosysopc.ua.types.opcua.AnalogItemType;
-
+/**
+ * 
+ * @author jperez@brockhaus-gruppe.de, Nov 16, 2015
+ * Copyright by: Brockhaus Group (Wiesbaden, Heidelberg, Bhubaneswar/India)
+ *
+ */
 public class Midgard 
 {
-	// Attributes
+	// create an UaClient object which encapsulates the connection to the OPC UA server
 	static UaClient client;
+	// define the server you are connecting to
 	static final String SERVERURI = "opc.tcp://srumpf-work.fritz.box:53530/OPCUA/SimulationServer";
+	// define a target node Id for the selected node
 	NodeId target;
+	// define a list of references(children or hierarchical relationships) 
+	// for each selected node
 	List<ReferenceDescription> references;
+	/* this variable selects the possible data that can be obtained from the node.
+	In this case, the parameter "value" of the node (integer number 13 in the 
+	node attributes list).*/
 	UnsignedInteger attributeId = UnsignedInteger.valueOf(13);
+	// allow to monitor variables that are changing in the server
 	Subscription subscription = new Subscription();
-	Logger log = Logger.getLogger(this.getClass().getName());
 	
-	// Constructor
+	Logger log = Logger.getLogger(this.getClass().getName());
+	boolean state = true;
+	Scanner sc = new Scanner(System.in);
+	
 	public Midgard() throws FileNotFoundException, IOException
 	{
+		// define logging behaviour establishing properties by a configuration file
 		Properties props = new Properties();
 		props.load(new FileInputStream("src/main/resources/log4j.properties"));
 		PropertyConfigurator.configure(props);
 	}
 	
-	// Methods
 	public void init() throws URISyntaxException, UnknownHostException, SecureIdentityException, IOException
 	{
+		// initiate the connection to the server
 		client = new UaClient(SERVERURI);
+		// define the security level in the OPC UA binary communications
 		client.setSecurityMode(SecurityMode.NONE);
+		// create an application instance certificate
 		initialize(client);
 		log.info("[-- STARTING INITIAL SETUP --]");
 	}
 	
 	public void connect() throws InvalidServerEndpointException, ConnectException, SessionActivationException, ServiceException
 	{
+		// connect to the server
 		client.connect();
 		log.info("[-- CONNECTED TO THE SERVER --]");
 	}
@@ -109,11 +128,19 @@ public class Midgard
 		nodeId = selectNode(5);
 		browse(nodeId);
 		
-		// subscribe to data changes
+		// subscribe to data changes for the Sawtooth1 node
 		subscribe(nodeId);
+		println("");
+		log.info("[-- READING VALUES CHANGES FROM THE SERVER NODES --]");
+		while(state){
+			String input = sc.nextLine();
+			// any input typed in by keyboard stops the reading
+			if(input != null)
+				state = false;
+		}
 	}
 	
-	public void doWrite() throws ServiceException, StatusException, ServiceResultException, InterruptedException, AddressSpaceException
+	public void doWrite() throws ServiceException, StatusException, ServiceResultException, InterruptedException, AddressSpaceException, IOException
 	{
 		// select the root node & browse the references for the root node
 		NodeId nodeId = Identifiers.RootFolder;
@@ -138,14 +165,18 @@ public class Midgard
 		write(nodeId);	
 	}
 	
-	public void disconnect() throws ServiceException
-	{
+	public void disconnect() throws ServiceException{
+		
+		sc.close();
+		// remove the subscription from the client
 		client.removeSubscription(subscription);
+		// disconnect from the server
 		client.disconnect();
-		log.info("[-- DISCONNECTED FROM THE SERVER --]");
 		println("");
+		log.info("[-- DISCONNECTED FROM THE SERVER --]");
 	}
 	
+	// define some shortcut methods for printing on the console
 	public void printf(String s)
 	{
 		System.out.printf(s);
@@ -171,63 +202,72 @@ public class Midgard
 		System.out.printf(format, args);
 	}
 	
+	// define some characteristics of the OPC UA Client application
 	public static void initialize(UaClient client)
 			throws SecureIdentityException, IOException, UnknownHostException 
 	{
-		// *** Application Description is sent to the server
+		// create an Application Description which is sent to the server
 		ApplicationDescription appDescription = new ApplicationDescription();
 		appDescription.setApplicationName(new LocalizedText("OpcuaClient", Locale.ENGLISH));
-		// 'localhost' (all lower case) in the URI is converted to the actual
-		// host name of the computer in which the application is run
+		/* 'localhost' (all lower case) in the ApplicationName and ApplicationURI
+		is converted to the actual host name of the computer in which the application
+		is run.*/
+		// ApplicationUri is a unique identifier for each running instance
 		appDescription.setApplicationUri("urn:localhost:UA:OpcuaClient");
+		// identify the product and should therefore be the same for all instances
 		appDescription.setProductUri("urn:prosysopc.com:UA:OpcuaClient");
+		// define the type of application
 		appDescription.setApplicationType(ApplicationType.Client);
 
+		// define the client application certificate
 		final ApplicationIdentity identity = new ApplicationIdentity();
 		identity.setApplicationDescription(appDescription);
+		// assign the identity to the Client
 		client.setApplicationIdentity(identity);
 	}
 	
-	public void browse(NodeId nodeId) throws ServiceException, StatusException
-	{
+	public void browse(NodeId nodeId) throws ServiceException, StatusException{
+		
+		// print information about the selected node currently
 		printCurrentNode(nodeId);
+		// define a limit of 1000 references per call to the server
 		client.getAddressSpace().setMaxReferencesPerNode(1000);
+		// receive only the hierarchical references between the nodes
 		client.getAddressSpace().setReferenceTypeId(Identifiers.HierarchicalReferences);
+		// define the references of the selected node by Id
 		references = client.getAddressSpace().browse(nodeId);
 		log.info("[-- NODE HIERARCHICAL REFERENCES --]");
+		// print the references
 		for (int i = 0; i < references.size(); i++)
 			printf("%d - %s\n", i, referenceToString(references.get(i)));
 		println("");
 	}
 	
-	protected void printCurrentNode(NodeId nodeId) 
-	{
+	protected void printCurrentNode(NodeId nodeId){
 		log.info("[-- SELECTED NODE --]");
 		if (client.isConnected())
-			// Find the node from the NodeCache
-			try 
-			{
+			// find the node from the NodeCache
+			try{
 				UaNode node = client.getAddressSpace().getNode(nodeId);
 
 				if (node == null)
 					return;
 				String currentNodeStr = getCurrentNodeAsString(node);
-				if (currentNodeStr != null) 
-				{
+				if (currentNodeStr != null){
+					// print the corresponding information
 					println(currentNodeStr);
 					println("");
 				}
 			} 
-			catch (ServiceException e) 
-			{
+			catch (ServiceException e){
 				println(e);
 			} 
-			catch (AddressSpaceException e) 
-			{
+			catch (AddressSpaceException e){
 				println(e);
 			}
 	}
 	
+	// convert the node reference information to String format
 	protected String referenceToString(ReferenceDescription r)
 			throws ServerConnectionException, ServiceException, StatusException 
 	{
@@ -236,7 +276,7 @@ public class Midgard
 		String referenceTypeStr = null;
 		try 
 		{
-			// Find the reference type from the NodeCache
+			// find the reference type from the NodeCache
 			UaReferenceType referenceType = (UaReferenceType) client.getAddressSpace().getType(r.getReferenceTypeId());
 			if ((referenceType != null) && (referenceType.getDisplayName() != null))
 				if (r.getIsForward())
@@ -257,7 +297,7 @@ public class Midgard
 			case Variable:
 				try 
 				{
-					// Find the type from the NodeCache
+					// find the type from the NodeCache
 					UaNode type = client.getAddressSpace().getNode(r.getTypeDefinition());
 					if (type != null)
 						typeStr = type.getDisplayName().getText();
@@ -279,6 +319,7 @@ public class Midgard
 				referenceTypeStr, r.getBrowseName(), r.getIsForward() ? "" : " [Inverse]");
 	}
 	
+	// method for manipulating dates and convert them into Strings
 	protected static String dateTimeToString(String title, DateTime timestamp, UnsignedShort picoSeconds) 
 	{
 		if ((timestamp != null) && !timestamp.equals(DateTime.MIN_VALUE)) 
@@ -293,6 +334,7 @@ public class Midgard
 		return "";
 	}
 
+	// show information about the selected current node
 	protected String getCurrentNodeAsString(UaNode node) 
 	{
 		String nodeStr = "";
@@ -304,12 +346,11 @@ public class Midgard
 			type = ((UaInstance) node).getTypeDefinition();
 		typeStr = (type == null ? nodeClassToStr(node.getNodeClass()) : type.getDisplayName().getText());
 
-		// This is the way to access type specific nodes and their
-		// properties, for example to show the engineering units and
-		// range for all AnalogItems
+		/* This is the way to access type specific nodes and their
+		properties, for example to show the engineering units and
+		range for all AnalogItems */
 		if (node instanceof AnalogItemType)
-			try 
-			{
+			try{
 				AnalogItemType analogNode = (AnalogItemType) node;
 				EUInformation units = analogNode.getEngineeringUnits();
 				analogInfoStr = units == null ? "" : " Units=" + units.getDisplayName().getText();
@@ -317,8 +358,7 @@ public class Midgard
 				analogInfoStr = analogInfoStr
 						+ (range == null ? "" : String.format(" Range=(%f; %f)", range.getLow(), range.getHigh()));
 			} 
-			catch (Exception e) 
-			{
+			catch (Exception e){
 				println(e);
 			}
 
@@ -326,41 +366,44 @@ public class Midgard
 				analogInfoStr);
 		return currentNodeStr;
 	}
-		
-	private String nodeClassToStr(NodeClass nodeClass) 
-		{
+	
+	// show information about the node class
+	private String nodeClassToStr(NodeClass nodeClass){
 			return "[" + nodeClass + "]";
 		}
 	
-	public NodeId selectNode(int selection) throws ServiceResultException
-	{
+	/* select the next node according to its integer value
+	in the list of references of the current node */
+	public NodeId selectNode(int selection) throws ServiceResultException{
 		ReferenceDescription r = references.get(selection);
 		target = client.getAddressSpace().getNamespaceTable().toNodeId(r.getNodeId());
 		return target;
 	}
 	
-	protected void readAttributeId() 
-	{
+	/* list the possible attributes/properties Ids of the current node. 
+	Ids are integer numbers */
+	protected void readAttributeId(){
 		log.info("[-- NODE ATTRIBUTES LIST --]");
 		for (long i = Attributes.NodeId.getValue(); i < Attributes.UserExecutable.getValue(); i++)
 			printf("%d - %s\n", i, AttributesUtil.toString(UnsignedInteger.valueOf(i)));
 	}
 	
-	protected void subscribe(NodeId nodeId) throws ServiceException, StatusException, InterruptedException
-	{
+	protected void subscribe(NodeId nodeId) throws ServiceException, StatusException, InterruptedException{
+		// print the node attributes/properties list
 		readAttributeId();
+		// define the monitored data item, which you listen to
 		MonitoredDataItem item = new MonitoredDataItem(nodeId, attributeId, MonitoringMode.Reporting);
+		// add it to the subscription
 		subscription.addItem(item);
+		// add the subscription to the client
 		client.addSubscription(subscription);
+		// establish a listener for the selected data item
 		item.setDataChangeListener(dataChangeListener);
-		println("");
-		log.info("[-- READING VALUES FROM THE SERVER NODE --]");
-		Thread.sleep(10000);
 	}
 	
+	// define the corresponding listener that monitors and print value changes on items
 	private static MonitoredDataItemListener dataChangeListener =
-			new MonitoredDataItemListener() 
-	{
+			new MonitoredDataItemListener(){
 			@Override
 			public void onDataChange(MonitoredDataItem sender, DataValue prevValue, DataValue value) 
 			{
@@ -369,6 +412,7 @@ public class Midgard
 			}
 	};
 	
+	// print the information about the value change on item according a predefined format
 	protected static String dataValueToString(NodeId nodeId, UnsignedInteger attributeId, DataValue value) 
 	{
 		StringBuilder sb = new StringBuilder();
@@ -421,35 +465,35 @@ public class Midgard
 		return sb.toString();
 	}
 	
-	protected void write(NodeId nodeId) throws ServiceException, AddressSpaceException, StatusException {
-
-		UaNode node = client.getAddressSpace().getNode(nodeId);
+	// write a predefined value for the Sawtooth1 signal node
+	protected void write(NodeId nodeId) throws ServiceException, AddressSpaceException, StatusException, IOException {
 		println("");
-		log.info("[-- WRITING VALUES TO THE SERVER NODE--]");
+		log.info("[-- WRITING VALUES TO THE SERVER NODES --]");
+		
+		// select the node corresponding to the selected signal
+		UaNode node = client.getAddressSpace().getNode(nodeId);
 		println("Writing to node " + nodeId + " - " + node.getDisplayName().getText());
 
-		// Find the DataType if setting Value - for other properties you must
-		// find the correct data type yourself
+		/* find the DataType if setting Value - for other properties you must
+		find the correct data type yourself */
 		UaDataType dataType = null;
-		if (attributeId.equals(Attributes.Value) && (node instanceof UaVariable)) {
+		if (attributeId.equals(Attributes.Value) && (node instanceof UaVariable)){
 			UaVariable v = (UaVariable) node;
-			// Initialize DataType node, if it is not initialized yet
+			// initialize DataType node, if it is not initialized yet
 			if (v.getDataType() == null)
-				v.setDataType(client.getAddressSpace().getType(v.getDataTypeId()));
+			v.setDataType(client.getAddressSpace().getType(v.getDataTypeId()));
 			dataType = (UaDataType) v.getDataType();
 			println("DataType: " + dataType.getDisplayName().getText());
-		}
-
-		Double value = Double.parseDouble("3");
-		println("Value: " + String.valueOf(value));
-		long startTime = System.currentTimeMillis();
-		long elapsedTime = 0L;
-		
-		
-		while (elapsedTime <= 10000) 
-		{
-			client.writeAttribute(nodeId, attributeId, value);
-		    elapsedTime = (new Date()).getTime() - startTime;
+			// define the value for the selected signal
+			// In this case, a double value
+			Double value = Double.parseDouble("3");
+			println("Value: " + String.valueOf(value));
+			println("");
+			log.info("[-- READING VALUES CHANGES FROM THE SERVER NODES --]");
+			// write the value
+			while (true){
+				client.writeAttribute(nodeId, attributeId, value);
+		    } 
 		}
 		println("");
 	}
