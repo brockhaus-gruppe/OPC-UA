@@ -67,7 +67,7 @@ public class Midgard
 	// create an UaClient object which encapsulates the connection to the OPC UA server
 	static UaClient client;
 	// define the server you are connecting to
-	static final String SERVERURI = "opc.tcp://srumpf-work.fritz.box:53530/OPCUA/SimulationServer";
+	static final String SERVERURI = "opc.tcp://srumpf-work:53530/OPCUA/SimulationServer";
 	// define a target node Id for the selected node
 	NodeId target;
 	// define a list of references(children or hierarchical relationships) 
